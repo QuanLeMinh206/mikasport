@@ -65,12 +65,22 @@ public function destroy($id)
 // sort
 public function search(Request $request)
 {
-    $query = Product::query();
-    if ($request->has('name')) {
-        $query->where('name', 'LIKE', '%' . $request->name . '%');
+    try {
+        $query = Product::query();
+
+        // Kiểm tra nếu request có tham số 'name' và không rỗng
+        if ($request->has('name') && !empty($request->name)) {
+            $query->where('name', 'LIKE', '%' . $request->name . '%');
+        }
+
+        // Trả về danh sách sản phẩm
+        return response()->json($query->paginate(10));
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
-    return response()->json($query->paginate(10));
 }
+
+
 
 
 }
