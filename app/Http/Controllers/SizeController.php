@@ -7,12 +7,11 @@ use Illuminate\Http\Request;
 
 class SizeController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
+
     public function index()
     {
-        //
+$size =Size::all();
+return response()->json($size);
     }
 
     /**

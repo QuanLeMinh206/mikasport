@@ -3,15 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-
 
 class Size extends Model
 {
-    use HasFactory;
-
+    protected $table = 'sizes';
     protected $primaryKey = 'size_id';
-    protected $fillable = ['name'];
+    public $timestamps = true;
+
+    protected $fillable = [
+        'name',
+    ];
 
     public function products()
     {

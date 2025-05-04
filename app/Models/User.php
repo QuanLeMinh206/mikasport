@@ -7,7 +7,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+     use HasApiTokens, HasFactory, Notifiable;
 
     protected $primaryKey = 'user_id'; // Khóa chính là user_id
     public $incrementing = true; // Khóa chính tự động tăng
@@ -24,6 +24,11 @@ class User extends Authenticatable
         'img',
         'address',  // Cột address có trong bảng
     ];
+
+    public function carts()
+    {
+        return $this->hasMany(Cart::class, 'user_id');
+    }
 
     protected $hidden = [
         'password',

@@ -7,6 +7,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Session;
+use App\Models\Cart;
+use Illuminate\Support\Facades\Storage;
+
+use Illuminate\Support\Facades\Password; // ✅ Thêm dòng này
 class AuthController extends Controller
 {
     /**
@@ -25,54 +30,48 @@ class AuthController extends Controller
         return response()->json(User::all(), 200);
     }
 
+    // AuthController.php
 
 
-   public function login(Request $request)
-   {
-       try {
-           // Kiểm tra dữ liệu đầu vào
-           $request->validate([
-               'email' => 'required|email',
-               'password' => 'required|min:6',
-           ]);
+public function login(Request $request)
+{
+    // Validate dữ liệu đầu vào
+    $validator = Validator::make($request->all(), [
+        'email' => 'required|email',
+        'password' => 'required|min:6',
+    ]);
 
-           // Kiểm tra thông tin đăng nhập
-           $user = User::where('email', $request->email)->first();
+    if ($validator->fails()) {
+        return response()->json(['error' => $validator->errors()], 400);
+    }
 
-           if (!$user || !Hash::check($request->password, $user->password)) {
-               return response()->json(['error' => 'Email hoặc mật khẩu không đúng'], 401);
-           }
+    // Kiểm tra thông tin người dùng
+    $user = User::where('email', $request->email)->first();
 
-           // Kiểm tra người dùng đã đăng nhập trước đó
-    //     if (method_exists($user, 'tokens') && $user->tokens()->count() > 0) {
-      //   return response()->json(['error' => 'Người dùng đã đăng nhập trước đó'], 401);
-       //  }
+    if (!$user || !Hash::check($request->password, $user->password)) {
+        return response()->json(['error' => 'Invalid credentials'], 401);
+    }
 
-            //Tạo token đăng nhập
-         $token = $user->createToken('auth_token')->plainTextToken;
+    // Nếu đăng nhập thành công, tạo token mới
+    $token = $user->createToken('YourAppName')->plainTextToken;
 
-           // Kiểm tra quyền truy cập cho người dùng
-    //       if ($user->role != 1) { // Nếu role là số (tinyint)
-      //         return response()->json(['error' => 'Người dùng không có quyền truy cập'], 401);
-       //   }
+    return response()->json([
+        'message' => 'Login successful',
+        'data' => [
+            'user' => $user,
+            'token' => $token
+        ]
+    ]);
+}
 
-           return response()->json([
-               'message' => 'Đăng nhập thành công!',
-               'user' => $user,
-               'token' => $token,
-           ], 200);
-       } catch (\Exception $e) {
-           return response()->json([
-               'error' => 'Lỗi đăng nhập',
-               'message' => $e->getMessage(), // In lỗi cụ thể để debug
-           ], 500);
-       }
-   }
+
+
+
+
    public function register(Request $request)
    {
        try {
            $validator = Validator::make($request->all(), [
-               'full_name' => 'nullable|string|max:255',
                'user_name' => 'required|string|max:255|unique:users',
                'email' => 'required|string|email|max:255|unique:users',
                'password' => 'required|string|min:6|confirmed'
@@ -83,7 +82,7 @@ class AuthController extends Controller
            }
 
            $user = User::create([
-               'full_name' => $request->full_name,
+
                'user_name' => $request->user_name,
                'email' => $request->email,
 
@@ -112,57 +111,79 @@ class AuthController extends Controller
 
        return response()->json($user);
    }
-   public function update(Request $request, $id)
+
+
+   public function updateProfileApi(Request $request)
    {
-       try {
-           // Lấy thông tin người dùng hiện tại từ token
-           $currentUser = auth()->user();
+       $auth = auth()->user();
 
-           // Kiểm tra nếu không đăng nhập hoặc không lấy được user
-           if (!$currentUser) {
-               return response()->json(['message' => 'Chưa đăng nhập'], 401);
-           }
+       if (!$auth) {
+           return response()->json(['message' => 'Chưa xác thực'], 401);
+       }
 
-           // Ép kiểu `$id` sang số nguyên để đảm bảo so sánh chính xác
-           $userId = (int) $id;
+       // Validate cơ bản
+       $validator = Validator::make($request->all(), [
+           'full_name' => 'nullable|string|max:255',
+           'user_name' => 'nullable|string|max:255|unique:users,user_name,' . $auth->user_id . ',user_id',
+           'email' => 'nullable|email|max:255|unique:users,email,' . $auth->user_id . ',user_id',
+           'phone' => 'nullable|string|max:20',
+           'address' => 'nullable|string|max:255',
 
-           // Kiểm tra nếu người dùng hiện tại không phải là người cần cập nhật
-           if ($currentUser->user_id !== $userId) {
-               return response()->json(['message' => 'Không thể cập nhật thông tin người dùng khác'], 403);
-           }
+           // Không validate kiểu image ở đây để cho phép cả URL và file
+           'img' => 'nullable',
+       ]);
 
-           // Lấy thông tin người dùng cần cập nhật
-           $user = User::where('user_id', $userId)->first();
+       if ($validator->fails()) {
+           return response()->json(['errors' => $validator->errors()], 400);
+       }
 
-           // Kiểm tra nếu người dùng không tồn tại
-           if (!$user) {
-               return response()->json(['message' => 'Người dùng không tồn tại'], 404);
-           }
+       $data = $request->only('full_name', 'user_name', 'email', 'phone', 'address');
 
-           // Kiểm tra nếu user là admin thì không cho phép chỉnh sửa
-           if ((int) $user->role === 1) {
-               return response()->json(['message' => 'Không thể chỉnh sửa Admin'], 403);
-           }
+       // Đảm bảo thư mục tồn tại
+       if (!Storage::exists('public/avatars')) {
+           Storage::makeDirectory('public/avatars');
+       }
 
-           // Validate dữ liệu đầu vào
-           $validatedData = $request->validate([
-               'full_name' => 'nullable|string|max:255',
-               'email' => 'sometimes|required|email|unique:users,email,' . $userId . ',user_id',
-               'phone' => 'nullable|string|max:15',
-               'address' => 'nullable|string|max:255',
+       // Xử lý avatar:
+       if ($request->hasFile('img')) {
+           // Nếu là file upload
+           $file = $request->file('img');
+
+           // Validate kiểu file ảnh
+           $fileValidator = Validator::make(['img' => $file], [
+               'img' => 'image|mimes:jpeg,png,jpg|max:2048',
            ]);
 
-           // Cập nhật thông tin người dùng
-           $user->update($validatedData);
+           if ($fileValidator->fails()) {
+               return response()->json(['errors' => $fileValidator->errors()], 400);
+           }
 
-           return response()->json(['message' => 'Cập nhật thành công', 'user' => $user]);
+           // Xoá ảnh cũ
+           if ($auth->img && Storage::exists('public/' . $auth->img)) {
+               Storage::delete('public/' . $auth->img);
+           }
 
-       } catch (\Exception $e) {
-           return response()->json(['error' => $e->getMessage()], 500);
+           // Lưu ảnh
+           $avatarPath = $file->store('avatars', 'public');
+           $data['img'] = $avatarPath;
+       } elseif ($request->filled('img') && filter_var($request->img, FILTER_VALIDATE_URL)) {
+           // Nếu là URL hợp lệ → chỉ lưu URL vào DB
+           $data['img'] = $request->img;
        }
+    // dd($data);
+       \Log::info('DATA:', $data);
+       // Cập nhật user
+       $check = $auth->update($data);
+
+       if ($check) {
+           return response()->json([
+               'message' => 'Hồ sơ đã được cập nhật thành công!',
+               'user' => $auth->fresh()
+           ], 200);
+       }
+
+       return response()->json(['message' => 'Cập nhật hồ sơ thất bại, vui lòng thử lại.'], 500);
    }
-
-
 
     /**
      * Remove the specified resource from storage.
@@ -174,6 +195,8 @@ class AuthController extends Controller
 
             if ($user) {
                 $user->tokens()->delete(); // Xóa tất cả token của user
+                session()->invalidate();
+        session()->regenerateToken();
                 return response()->json(['message' => 'Bạn đã đăng xuất thành công'], 200);
             }
 
@@ -198,7 +221,82 @@ class AuthController extends Controller
              return response()->json(['message' => 'Tài khoản đã được xóa thành công']);
     }
 
+    public function getUser(Request $request)
+    {
+        return response()->json([
+            'user'=>$request->user()
+        ]);
+    }
+
+
+    public function forgotPassword(Request $request)
+    {
+        $request->validate(['email' => 'required|email']);
+
+        $status = Password::sendResetLink($request->only('email'));
+
+        return $status === Password::RESET_LINK_SENT
+            ? response()->json(['message' => 'Chúng tôi đã gửi email đặt lại mật khẩu!'])
+            : response()->json(['message' => 'Email không tồn tại!'], 400);
+    }
 
 
 
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'token' => 'required',
+            'password' => 'required|min:6|confirmed',
+        ]);
+
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function ($user, $password) {
+                $user->password = Hash::make($password);
+                $user->save();
+            }
+        );
+
+        return $status === Password::PASSWORD_RESET
+            ? response()->json(['message' => 'Mật khẩu đã được đặt lại!'])
+            : response()->json(['message' => 'Token không hợp lệ!'], 400);
+    }
+
+    public function search(Request $request)
+    {
+        $name = $request->query('name'); // Get the 'name' parameter from URL
+        return response()->json(['searching_for' => $name]);
+    }
+
+
+
+    public function changePassword(Request $request)
+    {
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Chưa xác thực'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required',
+            'new_password' => 'required|min:6|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        // Kiểm tra xem mật khẩu hiện tại có đúng không
+        if (!Hash::check($request->current_password, $user->password)) {
+            return response()->json(['message' => 'Mật khẩu hiện tại không đúng'], 401);
+        }
+
+        // Cập nhật mật khẩu mới
+        $user->password = Hash::make($request->new_password);
+        $user->save();
+
+        return response()->json(['message' => 'Mật khẩu đã được thay đổi thành công!'], 200);
+    }
 }
